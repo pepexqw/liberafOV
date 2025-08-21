@@ -1,65 +1,83 @@
-// Глобальные переменные
+// Импортируем библиотеку socket.io-client
+import io from 'https://cdn.socket.io/socket.io-4.5.4.min.js';
+
+// Создаем глобальную переменную для хранения нашего RTCPeerConnection
 let peerConnection = null;
-const audioPlayers = document.getElementById('audioPlayers');
+
+// Элемент для отображения статуса комнаты
 const roomStatus = document.getElementById('roomStatus');
 
+// Подключаемся к нашему серверу сигнализаций
+const socket = io('http://localhost:3000'); // Укажите адрес вашего сервера
+
+// Обработчик события получения числа пользователей от сервера
+socket.on('usersCount', count => {
+    document.querySelector('#usersCount').innerText = `${count} Пользователей в чате`;
+});
+
+// Функция присоединения к общей комнате
 async function joinRoom() {
     try {
-        // Создаем RTCPeerConnection для обмена медиа-данными
+        // Настраиваем конфигурацию для RTCPeerConnection
         const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
         peerConnection = new RTCPeerConnection(configuration);
-        
-        // Получаем микрофон пользователя
+
+        // Запрашиваем доступ к микрофону пользователя
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
-        // Добавляем поток своего голоса к соединению
+
+        // Добавляем потоки медиаданных к нашей Peer Connection
         stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
-        
-        // Обработка входящих треков
+
+        // Обрабатываем входящие аудиотреки
         peerConnection.ontrack = event => {
             if (event.track.kind === 'audio') {
                 const player = document.createElement('audio');
                 player.srcObject = event.streams[0];
                 player.controls = true;
                 player.autoplay = true;
-                audioPlayers.appendChild(player);
+                document.getElementById('audioPlayers').appendChild(player);
             }
         };
-        
-        // Отправляем предложение другим пользователям присоединиться
+
+        // Генерация предложения подключения (Offer)
+        async function createOffer() {
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            
+            // Передача Offer другому участнику (реализуется дополнительно через сервер сигнализаций)
+            console.log('Отправлено предложение:', offer.sdp);
+        }
+
+        // Генерируем предложение подключения
         createOffer();
-        
-        roomStatus.textContent = 'Вы подключены!';
+
+        // Обновляем статус комнаты
+        roomStatus.textContent = 'Вы подключились к голосовому чату!';
     } catch (err) {
         console.error(err);
-        alert("Ошибка подключения");
+        alert("Ошибка подключения!");
     }
 }
 
-// Генерируем offer (предложение соединения)
-async function createOffer() {
-    try {
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        
-        // Здесь должна происходить отправка предложения другим участникам чата,
-        // например, через сервер сигнализаций типа Socket.io или Firebase Realtime Database
-        
-        console.log('Предложение создано:', offer.sdp);
-    } catch (err) {
-        console.error(err);
-    }
-}
-
-// Для примера обработчик события приема предложения от другого участника
+// Обработка кандидатов ICE
 peerConnection.onicecandidate = event => {
     if (event.candidate) {
-        // Обрабатываем кандидата ICE для завершения установления связи
-        console.log('ICE кандидат:', event.candidate);
+        console.log('Получили ICE-кандидат:', event.candidate);
     }
 };
 
-// Если сессия закрыта, очищаем ресурсы
+// Сообщаем серверу о присоединении и выходе
+socket.on('connect', () => {
+    console.log('Подключён к серверу');
+    socket.emit('join');
+});
+
+socket.on('disconnect', () => {
+    console.log('Отключён от сервера');
+    socket.emit('leave');
+});
+
+// Очистка ресурсов при закрытии окна браузера
 window.onbeforeunload = () => {
     if (peerConnection && peerConnection.connectionState !== 'closed') {
         peerConnection.close();
